@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DCA Pro Simulator - DJI</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 font-sans">
+    <div class="container mx-auto p-6">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-bold text-blue-800">📊 Simulador DCA Dinámico</h1>
+            <p class="text-gray-600">Estrategia DJI: Rebalanceo 80/20 + Gatillo de Compra</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div class="bg-white p-6 rounded-xl shadow-md lg:col-span-1">
+                <h2 class="text-xl font-semibold mb-4 border-b pb-2">Configuración</h2>
+                
+                <label class="block text-sm font-medium mb-1">Capital Inicial ($)</label>
+                <input type="number" id="capital" value="50000" class="w-full mb-4 p-2 border rounded">
+
+                <label class="block text-sm font-medium mb-1">Gatillo Caída (%)</label>
+                <input type="number" id="trigger" value="3" class="w-full mb-4 p-2 border rounded">
+
+                <label class="block text-sm font-medium mb-1">Multiplicador (x2, x3...)</label>
+                <input type="number" id="mult" value="3" class="w-full mb-4 p-2 border rounded">
+
+                <label class="block text-sm font-medium mb-1">Profit Take (%)</label>
+                <input type="number" id="profit" value="8" class="w-full mb-4 p-2 border rounded">
+
+                <button onclick="runSimulation()" class="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 transition">Simular Ahora</button>
+            </div>
+
+            <div class="bg-white p-6 rounded-xl shadow-md lg:col-span-3">
+                <canvas id="mainChart"></canvas>
+            </div>
+        </div>
+
+        <div id="results" class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
+            </div>
+    </div>
+
+    <script>
+        const prices = [17165, 18133, 17776, 18030, 18010, 17620, 17690, 16528, 16285, 17663, 17720, 17425, 16466, 16517, 17685, 17774, 17787, 17930, 18432, 18400, 18308, 18142, 19124, 19763, 19864, 20812, 20663, 20940, 21005, 21350, 21891, 21948, 22405, 23377, 24272, 24719, 26149, 25029, 24103, 24163, 24416, 24271, 25415, 25965, 26458, 25116, 25538, 23327, 24999, 25916, 25929, 26593, 24815, 26600, 26864, 26403, 26917, 27046, 28051, 28538, 28256, 25409, 21917, 24346, 25383, 25813, 26428, 28430, 27782, 26502, 29639, 30606, 29983, 30932, 32981, 33875, 34529, 34503, 34935, 35361, 33844, 35820, 34484, 36338];
+        let chart;
+
+        function runSimulation() {
+            const cap = parseFloat(document.getElementById('capital').value);
+            const trig = parseFloat(document.getElementById('trigger').value) / 100;
+            const mult = parseFloat(document.getElementById('mult').value);
+            const prof = parseFloat(document.getElementById('profit').value) / 100;
+
+            let cash = cap;
+            let shares = 0;
+            let basis = 0;
+            let history = [];
+            const monthlyBase = cap / prices.length;
+
+            prices.forEach((p, i) => {
+                cash *= (1 + 0.05 / 12); // 5% APR cash yield
+                const ret = i > 0 ? (p - prices[i-1]) / prices[i-1] : 0;
+                
+                // DCA
+                const buyAmt = ret <= -trig ? monthlyBase * mult : monthlyBase;
+                const actualBuy = Math.min(buyAmt, cash);
+                shares += actualBuy / p;
+                cash -= actualBuy;
+                basis += actualBuy;
+
+                // Profit Take
+                let equity = shares * p;
+                if (basis > 0 && (equity/basis - 1) > prof) {
+                    const surplus = equity - (basis * (1 + prof));
+                    shares -= surplus / p;
+                    cash += surplus;
+                }
+
+                // Rebalance 80/20
+                equity = shares * p;
+                const total = cash + equity;
+                const adj = (total * 0.8) - equity;
+                if (adj > 0) {
+                    const buyV = Math.min(adj, cash);
+                    shares += buyV / p;
+                    cash -= buyV;
+                    basis += buyV;
+                } else {
+                    const sellV = Math.abs(adj);
+                    shares -= sellV / p;
+                    cash += sellV;
+                }
+                history.push(cash + (shares * p));
+            });
+
+            renderChart(history);
+            renderStats(history[history.length-1], cap);
+        }
+
+        function renderChart(data) {
+            const ctx = document.getElementById('mainChart').getContext('2d');
+            if (chart) chart.destroy();
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: Array.from({length: data.length}, (_, i) => i + 1),
+                    datasets: [{
+                        label: 'Valor Portafolio ($)',
+                        data: data,
+                        borderColor: '#2563eb',
+                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                        fill: true
+                    }]
+                }
+            });
+        }
+
+        function renderStats(final, initial) {
+            const roi = ((final/initial - 1) * 100).toFixed(2);
+            document.getElementById('results').innerHTML = `
+                <div class="bg-blue-800 text-white p-4 rounded-lg shadow text-center">
+                    <p class="text-sm">Valor Final</p>
+                    <p class="text-2xl font-bold">$${final.toLocaleString(undefined, {maximumFractionDigits:2})}</p>
+                </div>
+                <div class="bg-green-600 text-white p-4 rounded-lg shadow text-center">
+                    <p class="text-sm">ROI Total</p>
+                    <p class="text-2xl font-bold">${roi}%</p>
+                </div>
+                <div class="bg-gray-800 text-white p-4 rounded-lg shadow text-center">
+                    <p class="text-sm">Objetivo $100k</p>
+                    <p class="text-2xl font-bold">${final >= 100000 ? '✅ LOGRADO' : '⏳ EN PROCESO'}</p>
+                </div>
+            `;
+        }
+        runSimulation();
+    </script>
+</body>
+</html>
